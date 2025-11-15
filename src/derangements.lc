@@ -1,0 +1,89 @@
+## Utils ##
+id = \ x . x
+const = \ x _ . x
+fix = \ f . (\ x . f (\ v . x x v)) (\ x . f (\ v . x x v))
+flip = \ f . \ x y . f y x
+compose = \ f g . \ x . f (g x)
+null = fix id
+
+## Bools ##
+true  = \ c-true c-false . c-true
+false = \ c-true c-false . c-false
+not = flip
+and = \ x y . x y false
+or = \ x y . x true y
+
+## Tuples ##
+pair = \ x y . \ c-pair . c-pair x y
+pair-fst = \ p . p (\ x y . x)
+pair-snd = \ p . p (\ x y . y)
+
+triple = \ x y z . \ c-triple . c-triple x y z
+triple-fst = \ t . t (\ x y z . x)
+triple-snd = \ t . t (\ x y z . y)
+triple-thd = \ t . t (\ x y z . z)
+triple-map-fst = \ f t . t (\ x y z . triple (f x) y z)
+triple-map-snd = \ f t . t (\ x y z . triple x (f y) z)
+triple-map-thd = \ f t . t (\ x y z . triple x y (f z))
+
+## Orderings ##
+lt = \ c-lt c-eq c-gt . c-lt
+eq = \ c-lt c-eq c-gt . c-eq
+gt = \ c-lt c-eq c-gt . c-gt
+
+# Given a `cmp` function that returns an ordering, we can derive all the various comparison functions.
+derive-eq = \ cmp . \ x y . cmp x y false true  false
+derive-ne = \ cmp . \ x y . cmp x y true  false true
+derive-lt = \ cmp . \ x y . cmp x y true  false false
+derive-le = \ cmp . \ x y . cmp x y true  true  false
+derive-gt = \ cmp . \ x y . cmp x y false false true
+derive-ge = \ cmp . \ x y . cmp x y false true  true
+
+## Natural Numbers ##
+zero =       \ c-zero c-succ . c-zero
+succ = \ n . \ c-zero c-succ . c-succ n
+
+nat-cmp = fix \ self . \ n m . n (m eq (const lt)) (\n' . m gt (\ m' . self n' m'))
+
+nat-eq = derive-eq nat-cmp
+nat-ne = derive-ne nat-cmp
+nat-lt = derive-lt nat-cmp
+nat-le = derive-le nat-cmp
+nat-gt = derive-gt nat-cmp
+nat-ge = derive-ge nat-cmp
+
+## Lists ##
+nil  =          \ c-nil c-cons . c-nil
+cons = \ x xs . \ c-nil c-cons . c-cons x xs
+
+foldr = fix \ self . \ f z xs . xs z \y ys . f y (self f z ys)
+
+concat = \ xs ys . foldr cons ys xs
+zipWith = \ f . fix \ self . \ xs ys . xs nil \ x xs' . ys nil \ y ys' . cons (f x y) (self xs' ys')
+map = \ f . foldr (\ x xs . cons (f x) xs) nil
+filter = \ f . foldr (\ x xs . f x (cons x xs) xs) nil
+any = \ f . foldr (\ x acc . or (f x) acc) false
+all = \ f . foldr (\ x acc . and (f x) acc) true
+
+pairs = fix \ self . \ xs . xs nil (\ x xs' . concat (map (pair x) xs') (self xs'))
+
+group-by = \ f xs . foldr (\ x groups . groups (cons (cons x nil) nil) (\ group groups' . group null (\ y _ . f x y (cons (cons x group) groups') (cons (cons x nil) groups)))) nil xs
+
+# NOTE: this returns `eq` in the case that one list is a prefix of the other
+# (e.g. `[1, 2]` and `[1, 2, 3]` compare as `eq`); this works fine for our purposes.
+list-nat-cmp = \ xs ys . foldr (\o right . o o right o) eq (zipWith nat-cmp xs ys)
+list-nat-eq = derive-eq list-nat-cmp
+
+sort-by_split-by = \ cmp x . foldr (\ y. (cmp y x triple-map-fst triple-map-snd triple-map-thd) (cons y)) (triple nil nil nil)
+sort-by = \ cmp . fix \ self . \ xs . xs nil \ x _ . sort-by_split-by cmp x xs \ xs-lt xs-eq xs-gt . concat (self xs-lt) (concat xs-eq (self xs-gt))
+
+## The program ##
+main_tag-words = map (\ word . pair (sort-by nat-cmp word) word)
+main_sort-by-tag = sort-by (\ x y . list-nat-cmp (pair-fst x) (pair-fst y))
+main_group-by-tag = group-by (\ x y . list-nat-eq (pair-fst x) (pair-fst y))
+main_untag-groups = map (map pair-snd)
+main_pairify-groups = map pairs
+main_filter-empty = filter (\ xs . xs false (\ _ _ . true))
+main_filter-non-derangements = map (filter (\ p . all id (zipWith nat-ne (pair-fst p) (pair-snd p))))
+
+main = \ words . main_filter-non-derangements (main_filter-empty (main_pairify-groups (main_untag-groups (main_group-by-tag (main_sort-by-tag (main_tag-words words))))))
